@@ -1,0 +1,27 @@
+name: Validate Compose Files
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate compose files
+        shell: bash
+        run: |
+          found=0
+          while IFS= read -r -d '' file; do
+            found=1
+            echo "Validating $file"
+            docker compose -f "$file" config --quiet
+          done < <(find apps stacks shared profiles -name "compose.yaml" -print0)
+
+          if [ "$found" -eq 0 ]; then
+            echo "No compose.yaml files found yet. Skipping validation."
+          fi
