@@ -4,7 +4,7 @@ Docker Atlas uses the Compose Specification as the baseline for reusable Compose
 
 ## File naming
 
-Use `compose.yaml` as the canonical file name.
+Use `compose.yaml` as the canonical Compose file name.
 
 Avoid legacy names unless compatibility requires them:
 
@@ -39,6 +39,20 @@ Set a clear top-level `name` value using lowercase letters, numbers, dashes, or 
 name: n8n
 ```
 
+## App structure
+
+Each catalogue entry should use this structure:
+
+```text
+apps/example-app/
+  compose.yaml
+  .env.example
+  metadata.yaml
+  README.md
+```
+
+Multi-service grouped deployments should live under `stacks/`.
+
 ## Environment variables
 
 Use variable interpolation with safe defaults where appropriate.
@@ -49,6 +63,13 @@ environment:
 ```
 
 Use `.env.example` for documented defaults. Do not commit real `.env` files.
+
+Prefer portable variables for host paths and common settings:
+
+```env
+TZ=Europe/London
+DATA_ROOT=./data
+```
 
 ## Host paths
 
@@ -79,6 +100,22 @@ For persistent homelab services, prefer:
 restart: unless-stopped
 ```
 
+## Volumes
+
+Use named volumes for simple app state, or `${DATA_ROOT}` paths when host-level backup control matters.
+
+```yaml
+volumes:
+  app_data:
+```
+
+or:
+
+```yaml
+volumes:
+  - ${DATA_ROOT:-./data}/example-app:/config
+```
+
 ## Networks
 
 Prefer explicit app networks.
@@ -98,6 +135,18 @@ Expose only required ports. Prefer environment variables for host ports.
 ports:
   - "${APP_PORT:-8080}:8080"
 ```
+
+## Health checks
+
+Add a health check when the upstream image supports a reliable check.
+
+## Labels
+
+Labels are optional. If used for reverse proxy integration, document the expected proxy and network.
+
+## Privileged options
+
+Avoid privileged containers, host networking, and Docker socket mounts unless required. Document the reason clearly in `README.md` and `metadata.yaml`.
 
 ## Metadata
 
