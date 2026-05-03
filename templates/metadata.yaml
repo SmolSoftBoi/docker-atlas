@@ -1,0 +1,55 @@
+id: example-app
+name: Example App
+category: example
+description: Short description of what this app does.
+homepage: https://example.com
+repository: https://github.com/example/example-app
+
+maintainers:
+  - name: Example Maintainer
+    github: example-maintainer
+  - name: Example Organisation
+    github: example-org
+
+images:
+  - name: example/example-app
+    registry: docker.io
+    recommended_tag: latest
+
+platforms:
+  - amd64
+  - arm64
+
+requirements:
+  ports:
+    - host: 8080
+      container: 80
+      protocol: tcp
+  volumes:
+    - name: example_data
+      purpose: Persistent app data
+  networks:
+    - app
+
+configuration:
+  env_file: .env.example
+  required_variables: []
+  optional_variables:
+    - TZ
+    - DATA_ROOT
+
+security:
+  internet_exposure: reverse-proxy-only
+  privileged: false
+  requires_docker_socket: false
+  requires_host_network: false
+  notes: Review upstream documentation before exposing publicly.
+
+backup:
+  stateful: true
+  paths:
+    - ${DATA_ROOT}/example-app
+  restore_notes: Restore the volume/path before starting the stack.
+
+status: draft
+last_reviewed: null
