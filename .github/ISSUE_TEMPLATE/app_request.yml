@@ -1,0 +1,34 @@
+name: App request
+description: Suggest a Docker Compose app for Docker Atlas
+title: "Add app: "
+labels: [app-request]
+body:
+  - type: input
+    id: app-name
+    attributes:
+      label: App name
+      placeholder: Example App
+    validations:
+      required: true
+  - type: input
+    id: homepage
+    attributes:
+      label: Homepage
+      placeholder: https://example.com
+  - type: input
+    id: repository
+    attributes:
+      label: Upstream repository
+      placeholder: https://github.com/example/example-app
+  - type: textarea
+    id: why
+    attributes:
+      label: Why should this be included?
+      placeholder: Explain the use case, category, and why it is useful.
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Deployment notes or risks
+      placeholder: Ports, volumes, privileged mode, host networking, Docker socket, default credentials, backup requirements, etc.
