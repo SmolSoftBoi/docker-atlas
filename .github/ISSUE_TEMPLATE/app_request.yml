@@ -1,34 +1,111 @@
 name: App request
-description: Suggest a Docker Compose app for Docker Atlas
+description: Suggest a reusable Docker Compose app for Docker Atlas
 title: "Add app: "
-labels: [app-request]
+labels: ["app-request", "needs-triage"]
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an app for Docker Atlas.
+
+        Please include enough detail to assess deployment risk, persistence, and catalogue fit.
+
   - type: input
     id: app-name
     attributes:
       label: App name
-      placeholder: Example App
+      placeholder: Uptime Kuma
     validations:
       required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - automation
+        - backup
+        - dashboard
+        - database
+        - development
+        - dns
+        - document-management
+        - finance
+        - home-automation
+        - identity
+        - media
+        - monitoring
+        - networking
+        - photo-management
+        - productivity
+        - proxy
+        - remote-access
+        - security
+        - storage
+        - updates
+        - other
+    validations:
+      required: true
+
   - type: input
     id: homepage
     attributes:
       label: Homepage
       placeholder: https://example.com
+
   - type: input
     id: repository
     attributes:
       label: Upstream repository
       placeholder: https://github.com/example/example-app
+
+  - type: input
+    id: image
+    attributes:
+      label: Docker image
+      placeholder: docker.io/example/example-app
+
   - type: textarea
     id: why
     attributes:
       label: Why should this be included?
-      placeholder: Explain the use case, category, and why it is useful.
+      placeholder: Explain the use case and why it belongs in Docker Atlas.
     validations:
       required: true
+
   - type: textarea
-    id: notes
+    id: deployment-notes
     attributes:
-      label: Deployment notes or risks
-      placeholder: Ports, volumes, privileged mode, host networking, Docker socket, default credentials, backup requirements, etc.
+      label: Deployment notes
+      placeholder: Ports, volumes, networks, environment variables, host paths, reverse proxy assumptions.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: risks
+    attributes:
+      label: Known risk areas
+      options:
+        - label: Requires Docker socket access
+        - label: Requires host networking
+        - label: Requires privileged mode
+        - label: Exposes an admin web UI
+        - label: Stores important persistent data
+        - label: Needs internet exposure
+        - label: Uses default credentials during setup
+
+  - type: textarea
+    id: backup
+    attributes:
+      label: Backup and restore notes
+      placeholder: What data must be backed up? How should it be restored?
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission checks
+      options:
+        - label: I have checked for an existing issue for this app.
+          required: true
+        - label: I understand real secrets should not be included in this issue.
+          required: true
