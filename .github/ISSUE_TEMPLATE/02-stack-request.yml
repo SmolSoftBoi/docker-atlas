@@ -1,0 +1,104 @@
+name: Stack request
+description: Suggest a grouped Docker Compose stack for Docker Atlas
+title: "Add stack: "
+labels: ["stack-request", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for grouped deployments that include multiple related services.
+
+  - type: input
+    id: stack-name
+    attributes:
+      label: Stack name
+      placeholder: monitoring-stack
+    validations:
+      required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Primary category
+      options:
+        - automation
+        - backup
+        - dashboard
+        - database
+        - development
+        - dns
+        - document-management
+        - finance
+        - home-automation
+        - identity
+        - media
+        - monitoring
+        - networking
+        - photo-management
+        - productivity
+        - proxy
+        - remote-access
+        - security
+        - storage
+        - updates
+        - other
+    validations:
+      required: true
+
+  - type: textarea
+    id: services
+    attributes:
+      label: Included services
+      placeholder: |
+        - prometheus
+        - grafana
+        - loki
+    validations:
+      required: true
+
+  - type: textarea
+    id: purpose
+    attributes:
+      label: Purpose
+      placeholder: Explain what the stack does and why the services belong together.
+    validations:
+      required: true
+
+  - type: textarea
+    id: deployment-notes
+    attributes:
+      label: Deployment notes
+      placeholder: Dependencies, ports, shared networks, environment variables, volumes, reverse proxy assumptions.
+    validations:
+      required: true
+
+  - type: textarea
+    id: persistence
+    attributes:
+      label: Persistence and backups
+      placeholder: Which services store state? What needs to be backed up and restored?
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: risks
+    attributes:
+      label: Known risk areas
+      options:
+        - label: Includes one or more admin web UIs
+        - label: Requires Docker socket access
+        - label: Requires host networking
+        - label: Requires privileged mode
+        - label: Requires public internet exposure
+        - label: Includes a database
+        - label: Includes sensitive data
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission checks
+      options:
+        - label: I have checked for an existing issue for this stack.
+          required: true
+        - label: I understand real secrets should not be included in this issue.
+          required: true
