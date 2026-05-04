@@ -1,0 +1,62 @@
+name: Entry fix
+description: Report or request a fix for an existing Docker Atlas entry
+title: "Fix entry: "
+labels: ["entry-fix", "needs-triage"]
+body:
+  - type: input
+    id: entry-path
+    attributes:
+      label: Entry path
+      placeholder: apps/uptime-kuma
+    validations:
+      required: true
+
+  - type: dropdown
+    id: fix-type
+    attributes:
+      label: Fix type
+      options:
+        - Compose validation failure
+        - Incorrect port
+        - Incorrect volume/path
+        - Missing environment variable
+        - Outdated image/version
+        - Missing documentation
+        - Security clarification
+        - Backup/restore clarification
+        - Broken link
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      placeholder: What is wrong, unclear, outdated, or missing?
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected fix
+      placeholder: What should be changed?
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence or references
+      placeholder: Upstream docs, logs, validation errors, tested Compose output, related issues, etc.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission checks
+      options:
+        - label: I have checked for an existing issue for this fix.
+          required: true
+        - label: I have not included real secrets, tokens, or passwords.
+          required: true
