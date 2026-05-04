@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/SmolSoftBoi/docker-atlas/security/policy
+    about: Please do not report private security vulnerabilities in public issues.
+  - name: General discussion
+    url: https://github.com/SmolSoftBoi/docker-atlas/discussions
+    about: Ask questions or discuss catalogue ideas.
