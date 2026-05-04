@@ -1,0 +1,61 @@
+name: Bug report
+description: Report a problem with Docker Atlas tooling, validation, or documentation
+title: "Bug: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Compose validation workflow
+        - Issue templates
+        - Pull request template
+        - Documentation
+        - Repository structure
+        - Existing app or stack entry
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      placeholder: Describe the bug or unexpected behaviour.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      placeholder: Describe the expected behaviour.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1.
+        2.
+        3.
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or output
+      description: Paste relevant logs. Remove secrets before submitting.
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission checks
+      options:
+        - label: I have checked for an existing bug report.
+          required: true
+        - label: I have removed secrets, tokens, passwords, and private URLs.
+          required: true
