@@ -1,0 +1,327 @@
+name: Sync project fields
+
+on:
+  issues:
+    types:
+      - opened
+      - edited
+      - labeled
+      - unlabeled
+      - reopened
+      - closed
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Issue number to sync. Leave blank to sync all open issues."
+        required: false
+        type: string
+      dry_run:
+        description: "Log planned updates without changing project fields."
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  sync-project-fields:
+    name: Sync issue metadata to project fields
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Sync project fields
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PROJECT_SYNC_TOKEN || github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const dryRun = Boolean(${{ inputs.dry_run || false }});
+            const projectOwner = process.env.PROJECT_OWNER || owner;
+            const projectNumber = Number(process.env.PROJECT_NUMBER);
+
+            if (!projectNumber) {
+              core.setFailed('Missing repository variable DOCKER_ATLAS_PROJECT_NUMBER.');
+              return;
+            }
+
+            const normalise = (value) => String(value || '').trim().toLowerCase();
+            const hasLabel = (issue, labelName) => issue.labels.some((label) => normalise(label.name) === normalise(labelName));
+
+            const getLabels = (issue) => issue.labels.map((label) => normalise(label.name));
+
+            async function graphql(query, variables) {
+              return github.graphql(query, variables);
+            }
+
+            async function loadProject() {
+              const common = `
+                id
+                fields(first: 50) {
+                  nodes {
+                    ... on ProjectV2FieldCommon {
+                      id
+                      name
+                      dataType
+                    }
+                    ... on ProjectV2SingleSelectField {
+                      id
+                      name
+                      dataType
+                      options {
+                        id
+                        name
+                      }
+                    }
+                  }
+                }
+                items(first: 100) {
+                  nodes {
+                    id
+                    content {
+                      ... on Issue {
+                        id
+                        number
+                        repository {
+                          nameWithOwner
+                        }
+                      }
+                    }
+                  }
+                }
+              `;
+
+              const userQuery = `query($login: String!, $number: Int!) {
+                user(login: $login) {
+                  projectV2(number: $number) { ${common} }
+                }
+              }`;
+
+              const orgQuery = `query($login: String!, $number: Int!) {
+                organization(login: $login) {
+                  projectV2(number: $number) { ${common} }
+                }
+              }`;
+
+              const viewerQuery = `query($number: Int!) {
+                viewer {
+                  projectV2(number: $number) { ${common} }
+                }
+              }`;
+
+              const attempts = [
+                ['user', () => graphql(userQuery, { login: projectOwner, number: projectNumber })],
+                ['organization', () => graphql(orgQuery, { login: projectOwner, number: projectNumber })],
+                ['viewer', () => graphql(viewerQuery, { number: projectNumber })],
+              ];
+
+              for (const [source, run] of attempts) {
+                try {
+                  const result = await run();
+                  const project = result.user?.projectV2 || result.organization?.projectV2 || result.viewer?.projectV2;
+                  if (project) {
+                    core.info(`Loaded project from ${source}: ${projectOwner} #${projectNumber}`);
+                    return project;
+                  }
+                } catch (error) {
+                  core.info(`Project lookup via ${source} failed: ${error.message}`);
+                }
+              }
+
+              throw new Error(`Could not load project ${projectOwner} #${projectNumber}. Check PROJECT_SYNC_TOKEN permissions and repository variables.`);
+            }
+
+            function getField(project, fieldName) {
+              return project.fields.nodes.find((field) => field && normalise(field.name) === normalise(fieldName));
+            }
+
+            function getSelectOption(field, value) {
+              if (!field || !field.options) return undefined;
+              return field.options.find((option) => normalise(option.name) === normalise(value));
+            }
+
+            function findProjectItem(project, issue) {
+              const repoName = `${owner}/${repo}`.toLowerCase();
+              return project.items.nodes.find((item) => {
+                const content = item.content;
+                return content?.number === issue.number && normalise(content.repository?.nameWithOwner) === repoName;
+              });
+            }
+
+            async function setSingleSelect(project, item, fieldName, value) {
+              if (!value) return;
+
+              const field = getField(project, fieldName);
+              if (!field) {
+                core.warning(`Project field not found: ${fieldName}`);
+                return;
+              }
+
+              const option = getSelectOption(field, value);
+              if (!option) {
+                core.warning(`Project field option not found: ${fieldName} = ${value}`);
+                return;
+              }
+
+              core.info(`Set ${fieldName} = ${value}`);
+
+              if (dryRun) return;
+
+              await graphql(`mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+                updateProjectV2ItemFieldValue(input: {
+                  projectId: $projectId
+                  itemId: $itemId
+                  fieldId: $fieldId
+                  value: { singleSelectOptionId: $optionId }
+                }) {
+                  projectV2Item { id }
+                }
+              }`, {
+                projectId: project.id,
+                itemId: item.id,
+                fieldId: field.id,
+                optionId: option.id,
+              });
+            }
+
+            function mapEntryType(issue) {
+              const title = normalise(issue.title);
+              if (hasLabel(issue, 'app request') || title.startsWith('add app:')) return 'App';
+              if (hasLabel(issue, 'stack request') || title.startsWith('add stack:')) return 'Stack';
+              if (hasLabel(issue, 'documentation') || hasLabel(issue, 'standards')) return 'Docs';
+              if (hasLabel(issue, 'tooling')) return 'Tooling';
+              return undefined;
+            }
+
+            function mapStatus(issue) {
+              if (issue.state === 'closed') return 'Done';
+              if (hasLabel(issue, 'needs review')) return 'Review';
+              if (hasLabel(issue, 'blocked')) return 'Blocked';
+              return 'Triage';
+            }
+
+            function mapPriority(issue) {
+              for (const value of ['p0', 'p1', 'p2', 'p3']) {
+                if (hasLabel(issue, value)) return value.toUpperCase();
+              }
+              return undefined;
+            }
+
+            function mapEffort(issue) {
+              if (hasLabel(issue, 'effort: small')) return 'Small';
+              if (hasLabel(issue, 'effort: medium')) return 'Medium';
+              if (hasLabel(issue, 'effort: large')) return 'Large';
+              return undefined;
+            }
+
+            function mapArea(issue) {
+              const labelToArea = {
+                media: 'Media',
+                monitoring: 'Monitoring',
+                automation: 'Automation',
+                dns: 'DNS',
+                updates: 'Automation',
+                proxy: 'Proxy',
+                notifications: 'Notifications',
+                'remote access': 'Network',
+                'private ai': 'Private AI',
+                'home automation': 'Home Automation',
+                bookmarks: 'Bookmarks',
+                storage: 'Storage',
+                security: 'Security',
+                documentation: 'Docs',
+                standards: 'Docs',
+                tooling: 'Utility',
+              };
+
+              const labels = getLabels(issue);
+              for (const [label, area] of Object.entries(labelToArea)) {
+                if (labels.includes(label)) return area;
+              }
+              return undefined;
+            }
+
+            function mapRiskReview(issue) {
+              const orderedRiskLabels = [
+                ['risk: docker socket', 'Docker socket'],
+                ['risk: privileged', 'Security'],
+                ['risk: host network', 'Network'],
+                ['risk: public exposure', 'Public exposure'],
+                ['risk: secrets', 'Secrets'],
+                ['risk: network impact', 'Network'],
+                ['risk: hardware access', 'Hardware'],
+                ['risk: stateful', 'Storage'],
+              ];
+
+              for (const [label, value] of orderedRiskLabels) {
+                if (hasLabel(issue, label)) return value;
+              }
+              return 'None';
+            }
+
+            function mapImplementationWave(issue) {
+              const milestoneTitle = normalise(issue.milestone?.title);
+              if (!milestoneTitle) return undefined;
+              if (milestoneTitle.includes('foundation') || milestoneTitle.startsWith('m0')) return 'Foundation';
+              if (milestoneTitle.includes('mvp') || milestoneTitle.startsWith('m1')) return 'MVP';
+              if (milestoneTitle.includes('media core') || milestoneTitle.startsWith('m2')) return 'Media Core';
+              if (milestoneTitle.includes('media expansion') || milestoneTitle.startsWith('m3')) return 'Media Expansion';
+              if (milestoneTitle.includes('stack') || milestoneTitle.startsWith('m4')) return 'Stacks';
+              return 'Later';
+            }
+
+            async function listIssuesToSync() {
+              const requestedIssue = '${{ inputs.issue_number || '' }}'.trim();
+
+              if (context.payload.issue) {
+                return [context.payload.issue];
+              }
+
+              if (requestedIssue) {
+                const issueNumber = Number(requestedIssue);
+                const { data } = await github.rest.issues.get({ owner, repo, issue_number: issueNumber });
+                return [data];
+              }
+
+              const issues = await github.paginate(github.rest.issues.listForRepo, {
+                owner,
+                repo,
+                state: 'open',
+                per_page: 100,
+              });
+
+              return issues.filter((issue) => !issue.pull_request);
+            }
+
+            async function syncIssue(project, issue) {
+              core.info(`Syncing #${issue.number}: ${issue.title}`);
+
+              const item = findProjectItem(project, issue);
+              if (!item) {
+                core.warning(`Issue #${issue.number} is not in project ${projectOwner} #${projectNumber}; skipping.`);
+                return;
+              }
+
+              await setSingleSelect(project, item, 'Entry type', mapEntryType(issue));
+              await setSingleSelect(project, item, 'Status', mapStatus(issue));
+              await setSingleSelect(project, item, 'Priority', mapPriority(issue));
+              await setSingleSelect(project, item, 'Effort', mapEffort(issue));
+              await setSingleSelect(project, item, 'Area', mapArea(issue));
+              await setSingleSelect(project, item, 'Risk review', mapRiskReview(issue));
+              await setSingleSelect(project, item, 'Implementation wave', mapImplementationWave(issue));
+            }
+
+            const project = await loadProject();
+            const issues = await listIssuesToSync();
+
+            core.info(`Dry run: ${dryRun}`);
+            core.info(`Issues to sync: ${issues.map((issue) => `#${issue.number}`).join(', ')}`);
+
+            for (const issue of issues) {
+              await syncIssue(project, issue);
+            }
+        env:
+          PROJECT_OWNER: ${{ vars.DOCKER_ATLAS_PROJECT_OWNER }}
+          PROJECT_NUMBER: ${{ vars.DOCKER_ATLAS_PROJECT_NUMBER }}
