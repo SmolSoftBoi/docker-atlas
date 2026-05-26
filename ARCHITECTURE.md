@@ -140,7 +140,7 @@ Suggested status values in `metadata.yaml`:
 
 ## Required entry files
 
-Each app or stack entry should include:
+Each app or stack entry should include the catalogue entry files defined in [Catalogue Standard: Required files](docs/catalogue-standard.md#required-files):
 
 ```text
 compose.yaml
@@ -149,21 +149,7 @@ metadata.yaml
 README.md
 ```
 
-### `compose.yaml`
-
-The runnable Compose definition.
-
-### `.env.example`
-
-Safe example configuration values and placeholders.
-
-### `metadata.yaml`
-
-Machine-readable catalogue data used for browsing, filtering, review, and future export.
-
-### `README.md`
-
-Human-readable deployment, maintenance, backup, restore, update, and security notes.
+Use [templates/metadata.yaml](templates/metadata.yaml) and [templates/README.template.md](templates/README.template.md) when creating new entries.
 
 ## Validation model
 
@@ -173,7 +159,7 @@ Every Compose file should pass:
 docker compose -f path/to/compose.yaml config --quiet
 ```
 
-The repository validation workflow scans these folders:
+The repository validation model applies to `compose.yaml` files under:
 
 ```text
 apps/
@@ -182,22 +168,11 @@ shared/
 profiles/
 ```
 
-A Compose file should be valid before a PR is marked ready for review.
+A Compose file should be valid before a PR is marked ready for review. Use [AGENTS.md](AGENTS.md#compose-validation) for local validation commands and the [Compose validation workflow](.github/workflows/validate-compose.yml) for CI behaviour.
 
 ## Security model
 
-Docker Atlas treats these as high-risk patterns:
-
-- Docker socket access
-- host networking
-- privileged mode
-- exposed admin web UIs
-- default credentials
-- persistent sensitive data
-- public tunnel or reverse proxy exposure
-- hardware or device mounts
-
-Risky patterns are allowed only when they are needed and clearly documented.
+Docker Atlas avoids risky permissions and public exposure by default. Risky patterns are allowed only when they are needed and clearly documented in the entry README and metadata; use the [Security Checklist](standards/security-checklist.md) for detailed review.
 
 ## Backup and restore model
 
@@ -222,7 +197,7 @@ stacks/private-ai
 stacks/media
 ```
 
-Use clear top-level Compose project names where appropriate:
+Set a clear top-level Compose `name` for each Compose entry, following [Compose Style Guide: Project name](standards/compose-style-guide.md#project-name):
 
 ```yaml
 name: open-webui

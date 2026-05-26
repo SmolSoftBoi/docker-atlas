@@ -14,25 +14,19 @@ Docker Atlas prioritises:
 - explicit security, backup, restore, and update notes
 
 ## Repository Structure
-- `apps/` — single application entries
-- `stacks/` — grouped multi-service deployment patterns
-- `shared/` — shared Compose fragments, common networks, and reusable patterns
-- `profiles/` — host-specific or environment-specific overrides
-- `templates/` — reusable metadata and README templates
-- `standards/` — style, security, and catalogue rules
-- `docs/` — supporting documentation and design notes
-- `.github/` — issue templates, pull request template, and validation workflows
+Use [ARCHITECTURE.md](ARCHITECTURE.md#repository-model) as the source of truth for the repository model. In short, `apps/` contains single app entries, `stacks/` contains grouped deployment patterns, `shared/` contains reusable Compose fragments, `profiles/` contains host-specific variants, and `templates/`, `standards/`, and `docs/` define reusable guidance.
 
 ## Core Standards
 Follow these repository standards before adding or changing entries:
-- `standards/compose-style-guide.md`
-- `standards/security-checklist.md`
-- `docs/catalogue-standard.md`
+- [Compose Style Guide](standards/compose-style-guide.md)
+- [Security Checklist](standards/security-checklist.md)
+- [Catalogue Standard](docs/catalogue-standard.md)
 
 # Instructions
 ## Non-Negotiables
 - Use `compose.yaml` as the canonical Compose filename.
 - Do not add the obsolete top-level `version` property.
+- Set a clear top-level Compose [`name`](standards/compose-style-guide.md#project-name) value for each Compose entry.
 - Do not commit real secrets, production `.env` files, tokens, passwords, private URLs, or tunnel credentials.
 - Keep single app entries in `apps/`.
 - Keep grouped deployment patterns in `stacks/`.
@@ -50,41 +44,19 @@ metadata.yaml
 README.md
 ```
 
-Use `templates/metadata.yaml` and `templates/README.template.md` as the starting point.
+Use [templates/metadata.yaml](templates/metadata.yaml) and [templates/README.template.md](templates/README.template.md) as the starting point.
+See [Catalogue Standard: Required files](docs/catalogue-standard.md#required-files) for the role of each file.
 
 ## App vs. Stack Boundaries
-- Use `apps/` for one deployable app, even if it has optional integrations.
-- Use `stacks/` when multiple services form one operational pattern, such as:
-  - n8n + Postgres + Redis
-  - Jellyfin or Plex + Sonarr + Radarr + Prowlarr + qBittorrent
-  - Open WebUI + optional n8n + optional local model endpoint
+- Use `apps/` for one deployable app, even if it has optional integrations; see [Apps](ARCHITECTURE.md#apps).
+- Use `stacks/` when multiple services form one operational pattern; see [Stacks](ARCHITECTURE.md#stacks).
 - If unsure, start with an app issue and propose a stack separately.
 
 ## Security Expectations
-Treat these as high-risk and document them clearly when required:
-- Docker socket mounts
-- `privileged: true`
-- `network_mode: host`
-- public admin web UIs
-- default credentials
-- persistent sensitive data
-- tunnel or reverse proxy exposure
-- hardware/device mounts
-
-Avoid risky permissions by default. If an upstream image requires them, explain why in both `README.md` and `metadata.yaml`.
+Use the [Security Checklist](standards/security-checklist.md) and [Architecture security model](ARCHITECTURE.md#security-model) as the source of truth for risky patterns. Avoid risky permissions by default. If an upstream image requires them, explain why in both `README.md` and `metadata.yaml`.
 
 ## Documentation Expectations
-Every entry `README.md` should explain:
-- what the app or stack does
-- what services are included
-- required ports
-- required volumes and paths
-- environment variables
-- first-run setup
-- backup and restore
-- update steps
-- security notes
-- reverse proxy assumptions, where relevant
+Every entry `README.md` should follow [templates/README.template.md](templates/README.template.md) and the [Catalogue Standard review expectations](docs/catalogue-standard.md#review-expectations), including deployment, maintenance, backup, restore, update, and security notes.
 
 ## Pull Request Expectations
 Every pull request should:
@@ -120,10 +92,20 @@ docker compose -f path/to/compose.yaml config --quiet
 To validate every Compose file in the repository:
 
 ```bash
-find apps stacks shared profiles -name "compose.yaml" -print0 | while IFS= read -r -d '' file; do
+found=0
+while IFS= read -r -d '' file; do
+  found=1
   echo "Validating $file"
-  docker compose -f "$file" config --quiet
-done
+  docker compose -f "$file" config --quiet || exit 1
+done < <(
+  for root in apps stacks shared profiles; do
+    [ -d "$root" ] && find "$root" -name "compose.yaml" -print0
+  done
+)
+
+if [ "$found" -eq 0 ]; then
+  echo "No compose.yaml files found yet. Skipping validation."
+fi
 ```
 
 If validation cannot be run, state that clearly in the pull request notes.
