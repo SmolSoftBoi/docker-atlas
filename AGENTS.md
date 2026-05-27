@@ -123,7 +123,7 @@ If validation cannot be run, state that clearly in the pull request notes.
 
 ## Persistence
 - Continue until the user’s query is fully resolved.
-- Do not stop on uncertainty; choose the most reasonable path and document assumptions at the end when needed.
+- When uncertainty is low-impact, choose the most reasonable path and document assumptions at the end. When uncertainty affects security, ops, data, public exposure, schema, or repository structure, ask for review before proceeding.
 - End only when success criteria are met.
 
 ## Stop Conditions
