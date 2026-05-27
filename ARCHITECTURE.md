@@ -26,6 +26,8 @@ Docker Atlas does not aim to be:
 
 ## Repository model
 
+This model describes the intended catalogue layout. In a fresh checkout, entry directories such as `apps/`, `stacks/`, `shared/`, and `profiles/` may be absent until the first matching entry or profile is added.
+
 ```text
 Docker Atlas
 ├── apps/        Single application entries
@@ -37,6 +39,8 @@ Docker Atlas
 ├── docs/        Supporting documentation
 └── .github/     Issue forms, PR template, and validation workflows
 ```
+
+<a id="apps"></a>
 
 ## Apps
 
@@ -53,6 +57,8 @@ apps/uptime-kuma/
 ```
 
 Apps may document optional integrations, but they should not bundle unrelated services by default.
+
+<a id="stacks"></a>
 
 ## Stacks
 
