@@ -19,8 +19,12 @@ jobs:
           while IFS= read -r -d '' file; do
             found=1
             echo "Validating $file"
-            docker compose -f "$file" config --quiet
-          done < <(find apps stacks shared profiles -name "compose.yaml" -print0)
+            docker compose -f "$file" config --quiet || exit 1
+          done < <(
+            for root in apps stacks shared profiles; do
+              [ -d "$root" ] && find "$root" -name "compose.yaml" -print0
+            done
+          )
 
           if [ "$found" -eq 0 ]; then
             echo "No compose.yaml files found yet. Skipping validation."
