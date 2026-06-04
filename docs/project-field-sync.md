@@ -66,8 +66,10 @@ The workflow runs when an issue is:
 
 - opened
 - edited
-- labelled
-- unlabelled
+- labeled
+- unlabeled
+- milestoned
+- demilestoned
 - reopened
 - closed
 
@@ -155,6 +157,7 @@ dry_run: false
 | `bookmarks` | `Bookmarks` |
 | `storage` | `Storage` |
 | `security` | `Security` |
+| `docs` | `Docs` |
 | `documentation` or `standards` | `Docs` |
 | `tooling` | `Utility` |
 
@@ -186,6 +189,8 @@ The workflow maps the issue milestone title into `Implementation wave`.
 | `Media Expansion` or starts with `M3` | `Media Expansion` |
 | `Stack` or starts with `M4` | `Stacks` |
 | anything else | `Later` |
+
+When a label or milestone no longer maps to an optional field value, the workflow clears the corresponding Project field instead of leaving stale metadata in place.
 
 ## Failure modes
 

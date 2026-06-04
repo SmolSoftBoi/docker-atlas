@@ -7,6 +7,8 @@ on:
       - edited
       - labeled
       - unlabeled
+      - milestoned
+      - demilestoned
       - reopened
       - closed
   workflow_dispatch:
@@ -24,6 +26,7 @@ on:
 permissions:
   contents: read
   issues: read
+  repository-projects: write
 
 jobs:
   sync-project-fields:
@@ -38,7 +41,8 @@ jobs:
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            const dryRun = Boolean(${{ inputs.dry_run || false }});
+            const dryRun = String(process.env.DISPATCH_DRY_RUN || 'false').trim().toLowerCase() === 'true';
+            const requestedIssue = String(process.env.DISPATCH_ISSUE_NUMBER || '').trim();
             const projectOwner = process.env.PROJECT_OWNER || owner;
             const projectNumber = Number(process.env.PROJECT_NUMBER);
 
@@ -77,7 +81,11 @@ jobs:
                     }
                   }
                 }
-                items(first: 100) {
+                items(first: 100, after: $itemsCursor) {
+                  pageInfo {
+                    hasNextPage
+                    endCursor
+                  }
                   nodes {
                     id
                     content {
@@ -93,35 +101,40 @@ jobs:
                 }
               `;
 
-              const userQuery = `query($login: String!, $number: Int!) {
+              const userQuery = `query($login: String!, $number: Int!, $itemsCursor: String) {
                 user(login: $login) {
                   projectV2(number: $number) { ${common} }
                 }
               }`;
 
-              const orgQuery = `query($login: String!, $number: Int!) {
+              const orgQuery = `query($login: String!, $number: Int!, $itemsCursor: String) {
                 organization(login: $login) {
                   projectV2(number: $number) { ${common} }
                 }
               }`;
 
-              const viewerQuery = `query($number: Int!) {
-                viewer {
-                  projectV2(number: $number) { ${common} }
-                }
-              }`;
-
               const attempts = [
-                ['user', () => graphql(userQuery, { login: projectOwner, number: projectNumber })],
-                ['organization', () => graphql(orgQuery, { login: projectOwner, number: projectNumber })],
-                ['viewer', () => graphql(viewerQuery, { number: projectNumber })],
+                ['user', (itemsCursor) => graphql(userQuery, { login: projectOwner, number: projectNumber, itemsCursor })],
+                ['organization', (itemsCursor) => graphql(orgQuery, { login: projectOwner, number: projectNumber, itemsCursor })],
               ];
 
               for (const [source, run] of attempts) {
                 try {
-                  const result = await run();
-                  const project = result.user?.projectV2 || result.organization?.projectV2 || result.viewer?.projectV2;
+                  const result = await run(null);
+                  const project = result.user?.projectV2 || result.organization?.projectV2;
                   if (project) {
+                    const items = [...project.items.nodes];
+                    let pageInfo = project.items.pageInfo;
+
+                    while (pageInfo.hasNextPage) {
+                      const page = await run(pageInfo.endCursor);
+                      const nextProject = page.user?.projectV2 || page.organization?.projectV2;
+                      if (!nextProject) break;
+                      items.push(...nextProject.items.nodes);
+                      pageInfo = nextProject.items.pageInfo;
+                    }
+
+                    project.items.nodes = items;
                     core.info(`Loaded project from ${source}: ${projectOwner} #${projectNumber}`);
                     return project;
                   }
@@ -151,11 +164,30 @@ jobs:
             }
 
             async function setSingleSelect(project, item, fieldName, value) {
-              if (!value) return;
-
               const field = getField(project, fieldName);
               if (!field) {
                 core.warning(`Project field not found: ${fieldName}`);
+                return;
+              }
+
+              if (!value) {
+                core.info(`Clear ${fieldName}`);
+
+                if (dryRun) return;
+
+                await graphql(`mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!) {
+                  clearProjectV2ItemFieldValue(input: {
+                    projectId: $projectId
+                    itemId: $itemId
+                    fieldId: $fieldId
+                  }) {
+                    projectV2Item { id }
+                  }
+                }`, {
+                  projectId: project.id,
+                  itemId: item.id,
+                  fieldId: field.id,
+                });
                 return;
               }
 
@@ -231,6 +263,7 @@ jobs:
                 bookmarks: 'Bookmarks',
                 storage: 'Storage',
                 security: 'Security',
+                docs: 'Docs',
                 documentation: 'Docs',
                 standards: 'Docs',
                 tooling: 'Utility',
@@ -273,14 +306,17 @@ jobs:
             }
 
             async function listIssuesToSync() {
-              const requestedIssue = '${{ inputs.issue_number || '' }}'.trim();
-
               if (context.payload.issue) {
                 return [context.payload.issue];
               }
 
               if (requestedIssue) {
                 const issueNumber = Number(requestedIssue);
+                if (!Number.isInteger(issueNumber) || issueNumber < 1) {
+                  core.setFailed(`Invalid issue_number input: ${requestedIssue}. Use a positive integer.`);
+                  return [];
+                }
+
                 const { data } = await github.rest.issues.get({ owner, repo, issue_number: issueNumber });
                 return [data];
               }
@@ -323,5 +359,7 @@ jobs:
               await syncIssue(project, issue);
             }
         env:
+          DISPATCH_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run || 'false' }}
+          DISPATCH_ISSUE_NUMBER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.issue_number || '' }}
           PROJECT_OWNER: ${{ vars.DOCKER_ATLAS_PROJECT_OWNER }}
           PROJECT_NUMBER: ${{ vars.DOCKER_ATLAS_PROJECT_NUMBER }}
