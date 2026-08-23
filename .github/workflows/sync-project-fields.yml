@@ -72,7 +72,11 @@ jobs:
             async function loadProject() {
               const common = `
                 id
-                fields(first: 50) {
+                fields(first: 50, after: $fieldsCursor) {
+                  pageInfo {
+                    hasNextPage
+                    endCursor
+                  }
                   nodes {
                     ... on ProjectV2FieldCommon {
                       id
@@ -110,37 +114,60 @@ jobs:
                 }
               `;
 
-              const userQuery = `query($login: String!, $number: Int!, $itemsCursor: String) {
+              const userQuery = `query($login: String!, $number: Int!, $fieldsCursor: String, $itemsCursor: String) {
                 user(login: $login) {
                   projectV2(number: $number) { ${common} }
                 }
               }`;
 
-              const orgQuery = `query($login: String!, $number: Int!, $itemsCursor: String) {
+              const orgQuery = `query($login: String!, $number: Int!, $fieldsCursor: String, $itemsCursor: String) {
                 organization(login: $login) {
                   projectV2(number: $number) { ${common} }
                 }
               }`;
 
               const attempts = [
-                ['user', (itemsCursor) => graphql(userQuery, { login: projectOwner, number: projectNumber, itemsCursor })],
-                ['organization', (itemsCursor) => graphql(orgQuery, { login: projectOwner, number: projectNumber, itemsCursor })],
+                ['user', ({ fieldsCursor = null, itemsCursor = null } = {}) => graphql(userQuery, {
+                  login: projectOwner,
+                  number: projectNumber,
+                  fieldsCursor,
+                  itemsCursor,
+                })],
+                ['organization', ({ fieldsCursor = null, itemsCursor = null } = {}) => graphql(orgQuery, {
+                  login: projectOwner,
+                  number: projectNumber,
+                  fieldsCursor,
+                  itemsCursor,
+                })],
               ];
 
               for (const [source, run] of attempts) {
                 try {
-                  const result = await run(null);
+                  const result = await run();
                   const project = result.user?.projectV2 || result.organization?.projectV2;
                   if (project) {
-                    const items = [...project.items.nodes];
-                    let pageInfo = project.items.pageInfo;
+                    const fields = [...project.fields.nodes];
+                    let fieldsPageInfo = project.fields.pageInfo;
 
-                    while (pageInfo.hasNextPage) {
-                      const page = await run(pageInfo.endCursor);
+                    while (fieldsPageInfo.hasNextPage) {
+                      const page = await run({ fieldsCursor: fieldsPageInfo.endCursor });
+                      const nextProject = page.user?.projectV2 || page.organization?.projectV2;
+                      if (!nextProject) break;
+                      fields.push(...nextProject.fields.nodes);
+                      fieldsPageInfo = nextProject.fields.pageInfo;
+                    }
+
+                    project.fields.nodes = fields;
+
+                    const items = [...project.items.nodes];
+                    let itemsPageInfo = project.items.pageInfo;
+
+                    while (itemsPageInfo.hasNextPage) {
+                      const page = await run({ itemsCursor: itemsPageInfo.endCursor });
                       const nextProject = page.user?.projectV2 || page.organization?.projectV2;
                       if (!nextProject) break;
                       items.push(...nextProject.items.nodes);
-                      pageInfo = nextProject.items.pageInfo;
+                      itemsPageInfo = nextProject.items.pageInfo;
                     }
 
                     project.items.nodes = items;
