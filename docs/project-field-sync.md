@@ -39,14 +39,7 @@ Settings → Secrets and variables → Actions → Variables
 
 ## Token configuration
 
-The workflow uses this token preference:
-
-1. `secrets.PROJECT_SYNC_TOKEN`, if present
-2. `GITHUB_TOKEN`, as a fallback
-
-For user-level Projects, `GITHUB_TOKEN` may not have enough access to update Project v2 fields.
-
-If the fallback token cannot access the Project, create a fine-grained personal access token and save it as:
+The workflow requires a project-capable token because the repository-scoped `GITHUB_TOKEN` cannot access Projects v2. Create a personal access token and save it as the repository secret:
 
 ```text
 PROJECT_SYNC_TOKEN
