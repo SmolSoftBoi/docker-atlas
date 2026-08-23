@@ -6,7 +6,7 @@ This entry provides separate bridge and host-network connectors. Each connector 
 
 ## What it includes
 
-- A `bridge` profile for an isolated connector on the named `cloudflare-tunnel` Docker network.
+- A `bridge` profile for an isolated connector on the shared external `cloudflare-tunnel` Docker network.
 - A `host` profile for an opt-in connector sharing the Docker host network namespace.
 - Direct `TUNNEL_TOKEN` environment injection inside each container, with no token mounts or `--token-file` usage.
 - A loopback metrics endpoint used by the container health check.
@@ -30,7 +30,14 @@ This entry provides separate bridge and host-network connectors. Each connector 
 
 3. Set the token for each selected profile in `.env`. Do not paste tokens into commands, Compose files, logs, or documentation.
 4. Select the required profile or profiles with `COMPOSE_PROFILES`.
-5. Start the connector or connectors:
+5. If `bridge` is selected, create its external Docker network once:
+
+   ```bash
+   docker network inspect cloudflare-tunnel >/dev/null 2>&1 ||
+     docker network create cloudflare-tunnel
+   ```
+
+6. Start the connector or connectors:
 
    ```bash
    docker compose up -d
@@ -53,7 +60,7 @@ DNS and connector state are independent. A healthy connector does not prove that
 
 | Profile | Default | Network behaviour | Use when |
 |---|---:|---|---|
-| `bridge` | Yes | Isolated bridge network named `cloudflare-tunnel` | Origins are containers on the shared network or are reachable by LAN address |
+| `bridge` | Yes | Shared external bridge network named `cloudflare-tunnel` | Origins are containers on the shared network or are reachable by LAN address |
 | `host` | No | Shares the Docker host network namespace | The connector must reach host-local or LAN services through the host network stack |
 
 Set one of the following values in `.env`:
@@ -86,6 +93,8 @@ Before changing profile selections, remove containers from the previous selectio
 ```bash
 docker compose --profile "*" down
 ```
+
+The external `cloudflare-tunnel` network is not removed by `docker compose down`, so other projects can remain attached across connector profile changes.
 
 ### Bridge origins
 

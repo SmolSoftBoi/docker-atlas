@@ -48,4 +48,5 @@ services:
 
 networks:
   cloudflare-tunnel:
+    external: true
     name: cloudflare-tunnel
