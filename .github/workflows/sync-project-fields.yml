@@ -52,8 +52,13 @@ jobs:
             const repo = context.repo.repo;
             const dryRun = String(process.env.DISPATCH_DRY_RUN || 'false').trim().toLowerCase() === 'true';
             const requestedIssue = String(process.env.DISPATCH_ISSUE_NUMBER || '').trim();
-            const projectOwner = process.env.PROJECT_OWNER || owner;
+            const projectOwner = String(process.env.PROJECT_OWNER || '').trim();
             const projectNumber = Number(process.env.PROJECT_NUMBER);
+
+            if (!projectOwner) {
+              core.setFailed('Missing repository variable DOCKER_ATLAS_PROJECT_OWNER.');
+              return;
+            }
 
             if (!projectNumber) {
               core.setFailed('Missing repository variable DOCKER_ATLAS_PROJECT_NUMBER.');

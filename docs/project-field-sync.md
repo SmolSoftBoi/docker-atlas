@@ -35,7 +35,7 @@ Settings → Secrets and variables → Actions → Variables
 | Variable | Required | Example | Purpose |
 |---|---:|---|---|
 | `DOCKER_ATLAS_PROJECT_NUMBER` | Yes | `1` | The visible Project number from the Project URL. |
-| `DOCKER_ATLAS_PROJECT_OWNER` | No | `SmolSoftBoi` | Project owner. Defaults to the repository owner if omitted. |
+| `DOCKER_ATLAS_PROJECT_OWNER` | Yes | `SmolSoftBoi` | Login of the user or organisation that owns the Project. |
 
 ## Required Project schema
 
