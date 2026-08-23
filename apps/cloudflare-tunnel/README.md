@@ -98,14 +98,16 @@ The external `cloudflare-tunnel` network is not removed by `docker compose down`
 
 ### Bridge origins
 
-The `bridge` connector can address another container by service name when that service joins the external `cloudflare-tunnel` network:
+The `bridge` connector can address another container by network alias when that service joins the external `cloudflare-tunnel` network:
 
 ```yaml
 services:
   example:
     image: example/example:1.0.0
     networks:
-      - cloudflare-tunnel
+      cloudflare-tunnel:
+        aliases:
+          - cloudflare-origin-example
 
 networks:
   cloudflare-tunnel:
@@ -113,7 +115,7 @@ networks:
     name: cloudflare-tunnel
 ```
 
-Configure its Cloudflare origin URL with the service name and container port, for example `http://example:8080`. Routable LAN origins can use an address such as `http://192.168.1.20:8080`. In bridge mode, `localhost` refers to the `cloudflared` container, not the Docker host.
+Give every origin a unique, DNS-compatible alias across all projects attached to this shared network, and use that alias plus the container port in the Cloudflare origin URL, for example `http://cloudflare-origin-example:8080`. Do not rely on common service names such as `web`, because duplicate aliases can make Docker DNS resolve the wrong container. Routable LAN origins can use an address such as `http://192.168.1.20:8080`. In bridge mode, `localhost` refers to the `cloudflared` container, not the Docker host.
 
 ### Host origins
 
@@ -167,6 +169,7 @@ The health check runs `cloudflared tunnel --metrics <address> ready`. It reports
 - Anyone with a tunnel token can run that tunnel. Treat both token variables as secrets and rotate either token immediately if exposed.
 - Environment-injected secrets are visible to users with sufficient Docker API or `docker inspect` access. Limit Docker access and protect `.env` with restrictive permissions.
 - `.env`, `local/`, and `secrets/` are ignored by this entry. Confirm `git status` before every commit.
+- Containers attached to the shared external `cloudflare-tunnel` network can reach one another directly, outside Cloudflare Access and published-route policies. Attach only necessary origins, and deploy isolated connectors on separate Docker networks for origins that must not communicate directly.
 - A public hostname routed through Cloudflare Tunnel is still public exposure unless Cloudflare Access or another policy restricts it. Keep origin authentication and application hardening enabled.
 - Do not disable origin TLS verification merely to bypass certificate errors. Prefer a valid certificate or a trusted private CA.
 - Host mode removes network-namespace isolation. Use bridge mode unless the origin genuinely requires the host network stack.
@@ -178,10 +181,17 @@ Rotate one connector at a time:
 
 1. Rotate or retrieve the selected tunnel token in Cloudflare.
 2. Update only its matching variable in `.env`.
-3. Recreate that connector:
+3. Recreate only the matching connector.
+
+   For bridge:
 
    ```bash
    docker compose --profile bridge up -d --force-recreate cloudflared-bridge
+   ```
+
+   For host:
+
+   ```bash
    docker compose --profile host up -d --force-recreate cloudflared-host
    ```
 
