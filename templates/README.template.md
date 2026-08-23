@@ -28,6 +28,24 @@ docker compose up -d
 | `TZ` | No | `Europe/London` | Container timezone |
 | `DATA_ROOT` | No | `./data` | Host data root |
 
+## Profiles
+
+Remove this section when the entry does not use Compose profiles. Otherwise, document every profile, the safe default, and whether profiles can be combined.
+
+| Profile | Default | Purpose | Can combine with |
+|---|---:|---|---|
+| `default-profile` | Yes | Standard deployment | `optional-profile` |
+| `optional-profile` | No | Opt-in deployment behaviour | `default-profile` |
+
+Select one or multiple profiles in `.env`:
+
+```dotenv
+COMPOSE_PROFILES=default-profile
+COMPOSE_PROFILES=default-profile,optional-profile
+```
+
+Repeated `--profile` flags are also supported. Explain that explicit CLI profile flags take precedence over `COMPOSE_PROFILES` and must name the complete intended profile set.
+
 ## Ports
 
 | Host | Container | Purpose |
@@ -68,4 +86,7 @@ docker compose up -d
 
 ```bash
 docker compose config --quiet
+docker compose config --profiles
+docker compose --profile default-profile config --quiet
+docker compose --profile "*" config --quiet
 ```

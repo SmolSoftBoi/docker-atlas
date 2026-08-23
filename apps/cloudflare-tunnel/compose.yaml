@@ -1,0 +1,52 @@
+name: cloudflare-tunnel
+
+x-cloudflared-common: &cloudflared-common
+  image: cloudflare/cloudflared:latest
+  restart: unless-stopped
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  command:
+    - tunnel
+    - --metrics
+    - "${METRICS_ADDRESS:-127.0.0.1:20241}"
+    - run
+  healthcheck:
+    test:
+      - CMD
+      - cloudflared
+      - tunnel
+      - --metrics
+      - "${METRICS_ADDRESS:-127.0.0.1:20241}"
+      - ready
+    interval: 30s
+    timeout: 5s
+    retries: 3
+    start_period: 30s
+
+services:
+  cloudflared-bridge:
+    <<: *cloudflared-common
+    profiles:
+      - bridge
+    hostname: "${TUNNEL_HOSTNAME_BRIDGE:-cloudflare-tunnel-bridge}"
+    environment:
+      TUNNEL_TOKEN: "${TUNNEL_TOKEN_BRIDGE:-}"
+    networks:
+      - cloudflare-tunnel
+
+  cloudflared-host:
+    <<: *cloudflared-common
+    profiles:
+      - host
+    hostname: "${TUNNEL_HOSTNAME_HOST:-cloudflare-tunnel-host}"
+    environment:
+      TUNNEL_TOKEN: "${TUNNEL_TOKEN_HOST:-}"
+    network_mode: host
+
+networks:
+  cloudflare-tunnel:
+    external: true
+    name: cloudflare-tunnel

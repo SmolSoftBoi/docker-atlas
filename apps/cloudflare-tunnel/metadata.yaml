@@ -1,0 +1,57 @@
+id: cloudflare-tunnel
+name: Cloudflare Tunnel
+category: proxy
+description: Outbound-only Cloudflare connectors with selectable bridge and host networking profiles.
+homepage: https://developers.cloudflare.com/tunnel/
+repository: https://github.com/cloudflare/cloudflared
+
+maintainers:
+  - name: SmolSoftBoi
+    github: SmolSoftBoi
+
+images:
+  - name: cloudflare/cloudflared
+    registry: docker.io
+    recommended_tag: latest
+
+platforms:
+  - amd64
+  - arm64
+
+requirements:
+  ports: []
+  volumes: []
+  networks:
+    - cloudflare-tunnel
+
+configuration:
+  env_file: .env.example
+  required_variables: []
+  optional_variables:
+    - COMPOSE_PROFILES
+    - TUNNEL_TOKEN_BRIDGE
+    - TUNNEL_TOKEN_HOST
+    - TUNNEL_HOSTNAME_BRIDGE
+    - TUNNEL_HOSTNAME_HOST
+    - METRICS_ADDRESS
+
+security:
+  internet_exposure: public
+  privileged: false
+  requires_docker_socket: false
+  requires_host_network: false
+  notes: >-
+    Each active profile requires its matching tunnel token. The optional host
+    profile shares the host network namespace and reduces network isolation.
+    Tunnel routes are public unless Cloudflare Access or equivalent controls
+    restrict them.
+
+backup:
+  stateful: false
+  paths: []
+  restore_notes: >-
+    Recreate or retrieve the remotely managed tunnel tokens, restore the
+    protected environment configuration, and redeploy the selected profiles.
+
+status: draft
+last_reviewed: null
