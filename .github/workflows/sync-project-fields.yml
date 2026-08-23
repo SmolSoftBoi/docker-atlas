@@ -62,6 +62,7 @@ jobs:
 
             const normalise = (value) => String(value || '').trim().toLowerCase();
             const hasLabel = (issue, labelName) => issue.labels.some((label) => normalise(label.name) === normalise(labelName));
+            const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
             const getLabels = (issue) => issue.labels.map((label) => normalise(label.name));
 
@@ -78,6 +79,7 @@ jobs:
                     endCursor
                   }
                   nodes {
+                    __typename
                     ... on ProjectV2FieldCommon {
                       id
                       name
@@ -88,6 +90,15 @@ jobs:
                       name
                       dataType
                       options {
+                        id
+                        name
+                      }
+                    }
+                    ... on ProjectV2MultiSelectField {
+                      id
+                      name
+                      dataType
+                      multiSelectOptions {
                         id
                         name
                       }
@@ -187,8 +198,8 @@ jobs:
             }
 
             function getSelectOption(field, value) {
-              if (!field || !field.options) return undefined;
-              return field.options.find((option) => normalise(option.name) === normalise(value));
+              const options = field?.options || field?.multiSelectOptions || [];
+              return options.find((option) => normalise(option.name) === normalise(value));
             }
 
             function findProjectItem(project, issue) {
@@ -199,14 +210,42 @@ jobs:
               });
             }
 
-            async function setSingleSelect(project, item, fieldName, value) {
+            async function findProjectItemWithRetry(project, issue) {
+              let currentProject = project;
+              let item = findProjectItem(currentProject, issue);
+              const shouldRetry = context.eventName === 'issues' && context.payload.action === 'opened';
+
+              if (item || !shouldRetry) return { project: currentProject, item };
+
+              for (const delay of [2000, 4000, 6000, 8000]) {
+                core.info(`Issue #${issue.number} is not in the project yet; retrying in ${delay / 1000}s.`);
+                await sleep(delay);
+                currentProject = await loadProject();
+                item = findProjectItem(currentProject, issue);
+                if (item) return { project: currentProject, item };
+              }
+
+              return { project: currentProject, item: undefined };
+            }
+
+            async function setSelect(project, item, fieldName, value) {
               const field = getField(project, fieldName);
               if (!field) {
                 core.warning(`Project field not found: ${fieldName}`);
                 return;
               }
 
-              if (!value) {
+              const isSingleSelect = field.__typename === 'ProjectV2SingleSelectField';
+              const isMultiSelect = field.__typename === 'ProjectV2MultiSelectField';
+
+              if (!isSingleSelect && !isMultiSelect) {
+                core.warning(`Project field is not a supported select field: ${fieldName}`);
+                return;
+              }
+
+              const requestedValues = Array.isArray(value) ? value : value ? [value] : [];
+
+              if (requestedValues.length === 0) {
                 core.info(`Clear ${fieldName}`);
 
                 if (dryRun) return;
@@ -227,13 +266,22 @@ jobs:
                 return;
               }
 
-              const option = getSelectOption(field, value);
-              if (!option) {
-                core.warning(`Project field option not found: ${fieldName} = ${value}`);
-                return;
+              const valuesToSelect = isMultiSelect ? requestedValues : [requestedValues[0]];
+              const options = [];
+              for (const requestedValue of valuesToSelect) {
+                const option = getSelectOption(field, requestedValue);
+                if (!option) {
+                  core.warning(`Project field option not found: ${fieldName} = ${requestedValue}`);
+                  return;
+                }
+
+                if (!options.some((existingOption) => existingOption.id === option.id)) {
+                  options.push(option);
+                }
               }
 
-              core.info(`Set ${fieldName} = ${value}`);
+              const selectedOptions = isMultiSelect ? options : [options[0]];
+              core.info(`Set ${fieldName} = ${selectedOptions.map((option) => option.name).join(', ')}`);
 
               if (dryRun) return;
 
@@ -250,7 +298,9 @@ jobs:
                 projectId: project.id,
                 itemId: item.id,
                 fieldId: field.id,
-                value: { singleSelectOptionId: option.id },
+                value: isMultiSelect
+                  ? { multiSelectOptionIds: selectedOptions.map((option) => option.id) }
+                  : { singleSelectOptionId: selectedOptions[0].id },
               });
             }
 
@@ -258,16 +308,18 @@ jobs:
               const title = normalise(issue.title);
               if (hasLabel(issue, 'app request') || title.startsWith('add app:')) return 'App';
               if (hasLabel(issue, 'stack request') || title.startsWith('add stack:')) return 'Stack';
-              if (hasLabel(issue, 'documentation') || hasLabel(issue, 'standards')) return 'Docs';
+              if (hasLabel(issue, 'documentation') || hasLabel(issue, 'standards')) return 'Documentation';
               if (hasLabel(issue, 'tooling')) return 'Tooling';
               return undefined;
             }
 
             function mapStatus(issue) {
               if (issue.state === 'closed') return 'Done';
-              if (hasLabel(issue, 'needs review')) return 'Review';
+              if (hasLabel(issue, 'needs review')) return 'In review';
               if (hasLabel(issue, 'blocked')) return 'Blocked';
-              return 'Triage';
+              if (hasLabel(issue, 'needs triage')) return 'Triage';
+              if (context.eventName === 'issues' && ['opened', 'reopened'].includes(context.payload.action)) return 'Triage';
+              return undefined;
             }
 
             function mapPriority(issue) {
@@ -277,10 +329,10 @@ jobs:
               return undefined;
             }
 
-            function mapEffort(issue) {
-              if (hasLabel(issue, 'effort: small')) return 'Small';
-              if (hasLabel(issue, 'effort: medium')) return 'Medium';
-              if (hasLabel(issue, 'effort: large')) return 'Large';
+            function mapSize(issue) {
+              if (hasLabel(issue, 'effort: small')) return 'S';
+              if (hasLabel(issue, 'effort: medium')) return 'M';
+              if (hasLabel(issue, 'effort: large')) return 'L';
               return undefined;
             }
 
@@ -288,21 +340,24 @@ jobs:
               const labelToArea = {
                 media: 'Media',
                 monitoring: 'Monitoring',
-                automation: 'Automation',
-                dns: 'DNS',
-                updates: 'Automation',
-                proxy: 'Proxy',
-                notifications: 'Notifications',
-                'remote access': 'Network',
                 'private ai': 'Private AI',
                 'home automation': 'Home Automation',
+                automation: 'Automation',
+                dns: 'DNS',
+                updates: 'Utility',
                 bookmarks: 'Bookmarks',
                 storage: 'Storage',
-                security: 'Security',
-                docs: 'Docs',
-                documentation: 'Docs',
-                standards: 'Docs',
+                docs: 'Documentation',
+                documents: 'Documentation',
+                documentation: 'Documentation',
+                standards: 'Documentation',
                 tooling: 'Utility',
+                utility: 'Utility',
+                travel: 'Utility',
+                security: 'Security',
+                proxy: 'Proxy',
+                'remote access': 'Network',
+                notifications: 'Notifications',
               };
 
               const labels = getLabels(issue);
@@ -324,10 +379,11 @@ jobs:
                 ['risk: stateful', 'Storage'],
               ];
 
-              for (const [label, value] of orderedRiskLabels) {
-                if (hasLabel(issue, label)) return value;
-              }
-              return 'None';
+              const values = orderedRiskLabels
+                .filter(([label]) => hasLabel(issue, label))
+                .map(([, value]) => value);
+
+              return values.length > 0 ? [...new Set(values)] : ['None'];
             }
 
             function mapImplementationWave(issue) {
@@ -370,19 +426,28 @@ jobs:
             async function syncIssue(project, issue) {
               core.info(`Syncing #${issue.number}: ${issue.title}`);
 
-              const item = findProjectItem(project, issue);
+              const lookup = await findProjectItemWithRetry(project, issue);
+              const currentProject = lookup.project;
+              const item = lookup.item;
               if (!item) {
                 core.warning(`Issue #${issue.number} is not in project ${projectOwner} #${projectNumber}; skipping.`);
                 return;
               }
 
-              await setSingleSelect(project, item, 'Entry type', mapEntryType(issue));
-              await setSingleSelect(project, item, 'Status', mapStatus(issue));
-              await setSingleSelect(project, item, 'Priority', mapPriority(issue));
-              await setSingleSelect(project, item, 'Effort', mapEffort(issue));
-              await setSingleSelect(project, item, 'Area', mapArea(issue));
-              await setSingleSelect(project, item, 'Risk review', mapRiskReview(issue));
-              await setSingleSelect(project, item, 'Implementation wave', mapImplementationWave(issue));
+              await setSelect(currentProject, item, 'Entry type', mapEntryType(issue));
+
+              const status = mapStatus(issue);
+              if (status) {
+                await setSelect(currentProject, item, 'Status', status);
+              } else {
+                core.info('Leave Status unchanged');
+              }
+
+              await setSelect(currentProject, item, 'Priority', mapPriority(issue));
+              await setSelect(currentProject, item, 'Size', mapSize(issue));
+              await setSelect(currentProject, item, 'Area', mapArea(issue));
+              await setSelect(currentProject, item, 'Risk review', mapRiskReview(issue));
+              await setSelect(currentProject, item, 'Implementation wave', mapImplementationWave(issue));
             }
 
             const project = await loadProject();
