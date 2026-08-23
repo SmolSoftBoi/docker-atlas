@@ -55,4 +55,4 @@ docker compose -f apps/example-app/compose.yaml config --quiet
 
 ## Status
 
-Early project scaffold. First catalogue entries coming next.
+Early project scaffold. Catalogue entries are being added incrementally.

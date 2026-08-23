@@ -100,6 +100,51 @@ For persistent homelab services, prefer:
 restart: unless-stopped
 ```
 
+## Profiles
+
+Use Compose profiles for explicit, opt-in deployment variants that belong in the same entry. Keep profile names lowercase and descriptive.
+
+```yaml
+services:
+  app:
+    image: example/example-app:1.0.0
+    profiles:
+      - default
+
+  app-host:
+    image: example/example-app:1.0.0
+    profiles:
+      - host
+    network_mode: host
+```
+
+If every service is profile-gated, set a safe `COMPOSE_PROFILES` default in `.env.example` so the documented `docker compose up -d` command starts the intended deployment.
+
+Document:
+
+- what each profile changes;
+- which profile is the default;
+- whether profiles may run together; and
+- any conflicting ports, volumes, network modes, or credentials.
+
+Users can select multiple profiles with a comma-separated environment value or repeated CLI flags:
+
+```env
+COMPOSE_PROFILES=default,host
+```
+
+```bash
+docker compose --profile default --profile host up -d
+```
+
+Explicit CLI profile flags take precedence over `COMPOSE_PROFILES`, so they should name the complete intended profile set. Documentation must make that active set unambiguous. Validate every profile separately and all profiles together:
+
+```bash
+docker compose --profile default config --quiet
+docker compose --profile host config --quiet
+docker compose --profile "*" config --quiet
+```
+
 ## Volumes
 
 Use named volumes for simple app state, or `${DATA_ROOT}` paths when host-level backup control matters.

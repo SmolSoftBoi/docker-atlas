@@ -15,11 +15,25 @@ jobs:
       - name: Validate compose files
         shell: bash
         run: |
+          set -euo pipefail
+
           found=0
           while IFS= read -r -d '' file; do
             found=1
             echo "Validating $file"
-            docker compose -f "$file" config --quiet || exit 1
+            docker compose -f "$file" config --quiet
+
+            profiles="$(docker compose -f "$file" config --profiles)"
+            while IFS= read -r profile; do
+              [ -n "$profile" ] || continue
+              echo "Validating $file with profile: $profile"
+              docker compose -f "$file" --profile "$profile" config --quiet
+            done <<< "$profiles"
+
+            if [ -n "$profiles" ]; then
+              echo "Validating $file with all profiles"
+              docker compose -f "$file" --profile "*" config --quiet
+            fi
           done < <(
             for root in apps stacks shared profiles; do
               [ -d "$root" ] && find "$root" -name "compose.yaml" -print0
