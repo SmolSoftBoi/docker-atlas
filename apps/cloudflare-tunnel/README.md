@@ -198,19 +198,36 @@ Back up `.env` only through an encrypted secret-management or backup system. Do 
 1. Recreate or retrieve each remotely managed tunnel token from Cloudflare.
 2. Restore `.env` from protected secret storage or rebuild it from `.env.example`.
 3. Select the required profiles.
-4. Run `docker compose up -d` and confirm the selected container health and dashboard status.
+4. If `bridge` is selected, recreate its external Docker network:
+
+   ```bash
+   docker network inspect cloudflare-tunnel >/dev/null 2>&1 ||
+     docker network create cloudflare-tunnel
+   ```
+
+5. Run `docker compose up -d` and confirm the selected container health and dashboard status.
 
 ## Update
 
 This entry intentionally follows `cloudflare/cloudflared:latest`, matching Cloudflare's container deployment guidance. A rolling tag can change without a repository diff, so review upstream [releases](https://github.com/cloudflare/cloudflared/releases) before updating.
 
-Update the selected profiles with:
+When `COMPOSE_PROFILES` in `.env` contains the complete active profile set, update the selected connectors with:
 
 ```bash
 docker compose pull
 docker compose up -d
 docker compose ps
 ```
+
+If profiles were selected with CLI flags instead, repeat the complete selection on both `pull` and `up`. For example, for a host-only deployment:
+
+```bash
+docker compose --profile host pull
+docker compose --profile host up -d
+docker compose ps
+```
+
+For a combined deployment, pass both `--profile bridge` and `--profile host` to both commands.
 
 For rollback, temporarily replace `latest` in `compose.yaml` with the last known-good release tag or digest, pull it, and recreate the selected connectors. Restore `latest` only after the upstream issue is understood.
 
