@@ -1,0 +1,504 @@
+name: Sync project fields
+
+on:
+  issues:
+    types:
+      - opened
+      - edited
+      - labeled
+      - unlabeled
+      - milestoned
+      - demilestoned
+      - reopened
+      - closed
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Issue number to sync. Leave blank to sync all open issues."
+        required: false
+        type: string
+      dry_run:
+        description: "Log planned updates without changing project fields."
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: project-field-sync-${{ github.event.issue.number || github.event.inputs.issue_number || 'bulk' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  sync-project-fields:
+    name: Sync issue metadata to project fields
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validate project token
+        env:
+          PROJECT_SYNC_TOKEN: ${{ secrets.PROJECT_SYNC_TOKEN }}
+        shell: bash
+        run: |
+          if [ -z "$PROJECT_SYNC_TOKEN" ]; then
+            echo "::error::Missing repository secret PROJECT_SYNC_TOKEN. GitHub's GITHUB_TOKEN cannot access Projects v2."
+            exit 1
+          fi
+
+      - name: Sync project fields
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PROJECT_SYNC_TOKEN }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const dryRun = String(process.env.DISPATCH_DRY_RUN || 'false').trim().toLowerCase() === 'true';
+            const requestedIssue = String(process.env.DISPATCH_ISSUE_NUMBER || '').trim();
+            const projectOwner = String(process.env.PROJECT_OWNER || '').trim();
+            const projectNumber = Number(process.env.PROJECT_NUMBER);
+
+            if (!projectOwner) {
+              core.setFailed('Missing repository variable DOCKER_ATLAS_PROJECT_OWNER.');
+              return;
+            }
+
+            if (!projectNumber) {
+              core.setFailed('Missing repository variable DOCKER_ATLAS_PROJECT_NUMBER.');
+              return;
+            }
+
+            const normalise = (value) => String(value || '').trim().toLowerCase();
+            const hasLabel = (issue, labelName) => issue.labels.some((label) => normalise(label.name) === normalise(labelName));
+            const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+            const getLabels = (issue) => issue.labels.map((label) => normalise(label.name));
+
+            async function graphql(query, variables) {
+              return github.graphql(query, variables);
+            }
+
+            async function loadProject() {
+              const common = `
+                id
+                fields(first: 50, after: $fieldsCursor) {
+                  pageInfo {
+                    hasNextPage
+                    endCursor
+                  }
+                  nodes {
+                    __typename
+                    ... on ProjectV2FieldCommon {
+                      id
+                      name
+                      dataType
+                    }
+                    ... on ProjectV2SingleSelectField {
+                      id
+                      name
+                      dataType
+                      options {
+                        id
+                        name
+                      }
+                    }
+                    ... on ProjectV2MultiSelectField {
+                      id
+                      name
+                      dataType
+                      multiSelectOptions {
+                        id
+                        name
+                      }
+                    }
+                  }
+                }
+                items(first: 100, after: $itemsCursor, archivedStates: [NOT_ARCHIVED, ARCHIVED]) {
+                  pageInfo {
+                    hasNextPage
+                    endCursor
+                  }
+                  nodes {
+                    id
+                    isArchived
+                    content {
+                      ... on Issue {
+                        id
+                        number
+                        repository {
+                          nameWithOwner
+                        }
+                      }
+                    }
+                  }
+                }
+              `;
+
+              const userQuery = `query($login: String!, $number: Int!, $fieldsCursor: String, $itemsCursor: String) {
+                user(login: $login) {
+                  projectV2(number: $number) { ${common} }
+                }
+              }`;
+
+              const orgQuery = `query($login: String!, $number: Int!, $fieldsCursor: String, $itemsCursor: String) {
+                organization(login: $login) {
+                  projectV2(number: $number) { ${common} }
+                }
+              }`;
+
+              const attempts = [
+                ['user', ({ fieldsCursor = null, itemsCursor = null } = {}) => graphql(userQuery, {
+                  login: projectOwner,
+                  number: projectNumber,
+                  fieldsCursor,
+                  itemsCursor,
+                })],
+                ['organization', ({ fieldsCursor = null, itemsCursor = null } = {}) => graphql(orgQuery, {
+                  login: projectOwner,
+                  number: projectNumber,
+                  fieldsCursor,
+                  itemsCursor,
+                })],
+              ];
+
+              for (const [source, run] of attempts) {
+                try {
+                  const result = await run();
+                  const project = result.user?.projectV2 || result.organization?.projectV2;
+                  if (project) {
+                    const fields = [...project.fields.nodes];
+                    let fieldsPageInfo = project.fields.pageInfo;
+
+                    while (fieldsPageInfo.hasNextPage) {
+                      const page = await run({ fieldsCursor: fieldsPageInfo.endCursor });
+                      const nextProject = page.user?.projectV2 || page.organization?.projectV2;
+                      if (!nextProject) break;
+                      fields.push(...nextProject.fields.nodes);
+                      fieldsPageInfo = nextProject.fields.pageInfo;
+                    }
+
+                    project.fields.nodes = fields;
+
+                    const items = [...project.items.nodes];
+                    let itemsPageInfo = project.items.pageInfo;
+
+                    while (itemsPageInfo.hasNextPage) {
+                      const page = await run({ itemsCursor: itemsPageInfo.endCursor });
+                      const nextProject = page.user?.projectV2 || page.organization?.projectV2;
+                      if (!nextProject) break;
+                      items.push(...nextProject.items.nodes);
+                      itemsPageInfo = nextProject.items.pageInfo;
+                    }
+
+                    project.items.nodes = items;
+                    core.info(`Loaded project from ${source}: ${projectOwner} #${projectNumber}`);
+                    return project;
+                  }
+                } catch (error) {
+                  core.info(`Project lookup via ${source} failed: ${error.message}`);
+                }
+              }
+
+              throw new Error(`Could not load project ${projectOwner} #${projectNumber}. Check PROJECT_SYNC_TOKEN permissions and repository variables.`);
+            }
+
+            function getField(project, fieldName) {
+              return project.fields.nodes.find((field) => field && normalise(field.name) === normalise(fieldName));
+            }
+
+            function getSelectOption(field, value) {
+              const options = field?.options || field?.multiSelectOptions || [];
+              return options.find((option) => normalise(option.name) === normalise(value));
+            }
+
+            function findProjectItem(project, issue) {
+              const repoName = `${owner}/${repo}`.toLowerCase();
+              return project.items.nodes.find((item) => {
+                const content = item.content;
+                return content?.number === issue.number && normalise(content.repository?.nameWithOwner) === repoName;
+              });
+            }
+
+            async function findProjectItemWithRetry(project, issue) {
+              let currentProject = project;
+              let item = findProjectItem(currentProject, issue);
+              const shouldRetry = context.eventName === 'issues' && issue.state === 'open';
+
+              if (item || !shouldRetry) return { project: currentProject, item };
+
+              for (const delay of [2000, 4000, 6000, 8000]) {
+                core.info(`Issue #${issue.number} is not in the project yet; retrying in ${delay / 1000}s.`);
+                await sleep(delay);
+                currentProject = await loadProject();
+                item = findProjectItem(currentProject, issue);
+                if (item) return { project: currentProject, item };
+              }
+
+              return { project: currentProject, item: undefined };
+            }
+
+            async function restoreProjectItem(project, item, issue) {
+              if (!item.isArchived || issue.state !== 'open') return;
+
+              core.info(`Restore #${issue.number} to the project`);
+
+              if (dryRun) return;
+
+              await graphql(`mutation($projectId: ID!, $itemId: ID!) {
+                unarchiveProjectV2Item(input: {
+                  projectId: $projectId
+                  itemId: $itemId
+                }) {
+                  item { id }
+                }
+              }`, {
+                projectId: project.id,
+                itemId: item.id,
+              });
+
+              item.isArchived = false;
+            }
+
+            async function setSelect(project, item, fieldName, value) {
+              const field = getField(project, fieldName);
+              if (!field) {
+                core.warning(`Project field not found: ${fieldName}`);
+                return;
+              }
+
+              const isSingleSelect = field.__typename === 'ProjectV2SingleSelectField';
+              const isMultiSelect = field.__typename === 'ProjectV2MultiSelectField';
+
+              if (!isSingleSelect && !isMultiSelect) {
+                core.warning(`Project field is not a supported select field: ${fieldName}`);
+                return;
+              }
+
+              const requestedValues = Array.isArray(value) ? value : value ? [value] : [];
+
+              if (requestedValues.length === 0) {
+                core.info(`Clear ${fieldName}`);
+
+                if (dryRun) return;
+
+                await graphql(`mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!) {
+                  clearProjectV2ItemFieldValue(input: {
+                    projectId: $projectId
+                    itemId: $itemId
+                    fieldId: $fieldId
+                  }) {
+                    projectV2Item { id }
+                  }
+                }`, {
+                  projectId: project.id,
+                  itemId: item.id,
+                  fieldId: field.id,
+                });
+                return;
+              }
+
+              const valuesToSelect = isMultiSelect ? requestedValues : [requestedValues[0]];
+              const options = [];
+              for (const requestedValue of valuesToSelect) {
+                const option = getSelectOption(field, requestedValue);
+                if (!option) {
+                  core.warning(`Project field option not found: ${fieldName} = ${requestedValue}`);
+                  return;
+                }
+
+                if (!options.some((existingOption) => existingOption.id === option.id)) {
+                  options.push(option);
+                }
+              }
+
+              const selectedOptions = isMultiSelect ? options : [options[0]];
+              core.info(`Set ${fieldName} = ${selectedOptions.map((option) => option.name).join(', ')}`);
+
+              if (dryRun) return;
+
+              await graphql(`mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: ProjectV2FieldValue!) {
+                updateProjectV2ItemFieldValue(input: {
+                  projectId: $projectId
+                  itemId: $itemId
+                  fieldId: $fieldId
+                  value: $value
+                }) {
+                  projectV2Item { id }
+                }
+              }`, {
+                projectId: project.id,
+                itemId: item.id,
+                fieldId: field.id,
+                value: isMultiSelect
+                  ? { multiSelectOptionIds: selectedOptions.map((option) => option.id) }
+                  : { singleSelectOptionId: selectedOptions[0].id },
+              });
+            }
+
+            function mapEntryType(issue) {
+              const title = normalise(issue.title);
+              if (hasLabel(issue, 'app request') || title.startsWith('add app:')) return 'App';
+              if (hasLabel(issue, 'stack request') || title.startsWith('add stack:')) return 'Stack';
+              if (hasLabel(issue, 'documentation') || hasLabel(issue, 'standards')) return 'Documentation';
+              if (hasLabel(issue, 'tooling')) return 'Tooling';
+              return undefined;
+            }
+
+            function mapStatus(issue) {
+              if (issue.state === 'closed') return 'Done';
+              if (hasLabel(issue, 'needs review')) return 'In review';
+              if (hasLabel(issue, 'blocked')) return 'Blocked';
+              if (hasLabel(issue, 'needs triage')) return 'Triage';
+              if (context.eventName === 'issues' && ['opened', 'reopened'].includes(context.payload.action)) return 'Triage';
+              return undefined;
+            }
+
+            function mapPriority(issue) {
+              for (const value of ['p0', 'p1', 'p2', 'p3']) {
+                if (hasLabel(issue, value)) return value.toUpperCase();
+              }
+              return undefined;
+            }
+
+            function mapSize(issue) {
+              if (hasLabel(issue, 'effort: small')) return 'S';
+              if (hasLabel(issue, 'effort: medium')) return 'M';
+              if (hasLabel(issue, 'effort: large')) return 'L';
+              return undefined;
+            }
+
+            function mapArea(issue) {
+              const labelToArea = {
+                media: 'Media',
+                monitoring: 'Monitoring',
+                'private ai': 'Private AI',
+                'home automation': 'Home Automation',
+                automation: 'Automation',
+                dns: 'DNS',
+                updates: 'Utility',
+                bookmarks: 'Bookmarks',
+                storage: 'Storage',
+                docs: 'Documentation',
+                documents: 'Documentation',
+                documentation: 'Documentation',
+                standards: 'Documentation',
+                tooling: 'Utility',
+                utility: 'Utility',
+                travel: 'Utility',
+                security: 'Security',
+                proxy: 'Proxy',
+                'remote access': 'Network',
+                notifications: 'Notifications',
+              };
+
+              const labels = getLabels(issue);
+              for (const [label, area] of Object.entries(labelToArea)) {
+                if (labels.includes(label)) return area;
+              }
+              return undefined;
+            }
+
+            function mapRiskReview(issue) {
+              const orderedRiskLabels = [
+                ['risk: docker socket', 'Docker socket'],
+                ['risk: privileged', 'Security'],
+                ['risk: host network', 'Network'],
+                ['risk: public exposure', 'Public exposure'],
+                ['risk: secrets', 'Secrets'],
+                ['risk: network impact', 'Network'],
+                ['risk: hardware access', 'Hardware'],
+                ['risk: stateful', 'Storage'],
+              ];
+
+              const values = orderedRiskLabels
+                .filter(([label]) => hasLabel(issue, label))
+                .map(([, value]) => value);
+
+              return values.length > 0 ? [...new Set(values)] : ['None'];
+            }
+
+            function mapImplementationWave(issue) {
+              const milestoneTitle = normalise(issue.milestone?.title);
+              if (!milestoneTitle) return undefined;
+              if (milestoneTitle.includes('foundation') || milestoneTitle.startsWith('m0')) return 'Foundation';
+              if (milestoneTitle.includes('mvp') || milestoneTitle.startsWith('m1')) return 'MVP';
+              if (milestoneTitle.includes('media core') || milestoneTitle.startsWith('m2')) return 'Media Core';
+              if (milestoneTitle.includes('media expansion') || milestoneTitle.startsWith('m3')) return 'Media Expansion';
+              if (milestoneTitle.includes('stack') || milestoneTitle.startsWith('m4')) return 'Stacks';
+              return 'Later';
+            }
+
+            async function listIssuesToSync() {
+              if (context.payload.issue) {
+                return [context.payload.issue];
+              }
+
+              if (requestedIssue) {
+                const issueNumber = Number(requestedIssue);
+                if (!Number.isInteger(issueNumber) || issueNumber < 1) {
+                  core.setFailed(`Invalid issue_number input: ${requestedIssue}. Use a positive integer.`);
+                  return [];
+                }
+
+                const { data } = await github.rest.issues.get({ owner, repo, issue_number: issueNumber });
+                return [data];
+              }
+
+              const issues = await github.paginate(github.rest.issues.listForRepo, {
+                owner,
+                repo,
+                state: 'open',
+                per_page: 100,
+              });
+
+              return issues.filter((issue) => !issue.pull_request);
+            }
+
+            async function syncIssue(project, issue) {
+              const lookup = await findProjectItemWithRetry(project, issue);
+              const currentProject = lookup.project;
+              const item = lookup.item;
+              if (!item) {
+                core.warning(`Issue #${issue.number} is not in project ${projectOwner} #${projectNumber}; skipping.`);
+                return;
+              }
+
+              const { data: currentIssue } = await github.rest.issues.get({
+                owner,
+                repo,
+                issue_number: issue.number,
+              });
+
+              core.info(`Syncing #${currentIssue.number}: ${currentIssue.title}`);
+              await restoreProjectItem(currentProject, item, currentIssue);
+              await setSelect(currentProject, item, 'Entry type', mapEntryType(currentIssue));
+
+              const status = mapStatus(currentIssue);
+              if (status) {
+                await setSelect(currentProject, item, 'Status', status);
+              } else {
+                core.info('Leave Status unchanged');
+              }
+
+              await setSelect(currentProject, item, 'Priority', mapPriority(currentIssue));
+              await setSelect(currentProject, item, 'Size', mapSize(currentIssue));
+              await setSelect(currentProject, item, 'Area', mapArea(currentIssue));
+              await setSelect(currentProject, item, 'Risk review', mapRiskReview(currentIssue));
+              await setSelect(currentProject, item, 'Implementation wave', mapImplementationWave(currentIssue));
+            }
+
+            const project = await loadProject();
+            const issues = await listIssuesToSync();
+
+            core.info(`Dry run: ${dryRun}`);
+            core.info(`Issues to sync: ${issues.map((issue) => `#${issue.number}`).join(', ')}`);
+
+            for (const issue of issues) {
+              await syncIssue(project, issue);
+            }
+        env:
+          DISPATCH_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run || 'false' }}
+          DISPATCH_ISSUE_NUMBER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.issue_number || '' }}
+          PROJECT_OWNER: ${{ vars.DOCKER_ATLAS_PROJECT_OWNER }}
+          PROJECT_NUMBER: ${{ vars.DOCKER_ATLAS_PROJECT_NUMBER }}
