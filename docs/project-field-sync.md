@@ -84,6 +84,8 @@ The workflow runs when an issue is:
 
 It can also be run manually with `workflow_dispatch`.
 
+Runs for the same issue share a concurrency group, so only one sync executes at a time. The workflow fetches the issue's current state immediately before applying field mappings.
+
 ## Manual sync
 
 Use manual dispatch from:
@@ -211,7 +213,8 @@ When a label or milestone no longer maps to an optional field value, the workflo
 The workflow is designed to fail safely:
 
 - If the Project number is missing, it stops with a clear error.
-- For a newly opened issue, it retries Project lookup for up to 20 seconds while the built-in auto-add workflow runs.
+- For an open issue event, it retries Project lookup for up to 20 seconds while the built-in auto-add workflow runs.
+- If an open issue has an archived Project item, it restores the item before updating its fields.
 - If an issue is still not in the Project, it logs a warning and skips it.
 - If a Project field or option is missing, it logs a warning and continues.
 - It does not print tokens or secret values.

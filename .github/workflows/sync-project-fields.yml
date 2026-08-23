@@ -23,6 +23,10 @@ on:
         default: false
         type: boolean
 
+concurrency:
+  group: project-field-sync-${{ github.event.issue.number || github.event.inputs.issue_number || 'bulk' }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
   issues: read
@@ -110,13 +114,14 @@ jobs:
                     }
                   }
                 }
-                items(first: 100, after: $itemsCursor) {
+                items(first: 100, after: $itemsCursor, archivedStates: [NOT_ARCHIVED, ARCHIVED]) {
                   pageInfo {
                     hasNextPage
                     endCursor
                   }
                   nodes {
                     id
+                    isArchived
                     content {
                       ... on Issue {
                         id
@@ -218,7 +223,7 @@ jobs:
             async function findProjectItemWithRetry(project, issue) {
               let currentProject = project;
               let item = findProjectItem(currentProject, issue);
-              const shouldRetry = context.eventName === 'issues' && context.payload.action === 'opened';
+              const shouldRetry = context.eventName === 'issues' && issue.state === 'open';
 
               if (item || !shouldRetry) return { project: currentProject, item };
 
@@ -231,6 +236,28 @@ jobs:
               }
 
               return { project: currentProject, item: undefined };
+            }
+
+            async function restoreProjectItem(project, item, issue) {
+              if (!item.isArchived || issue.state !== 'open') return;
+
+              core.info(`Restore #${issue.number} to the project`);
+
+              if (dryRun) return;
+
+              await graphql(`mutation($projectId: ID!, $itemId: ID!) {
+                unarchiveProjectV2Item(input: {
+                  projectId: $projectId
+                  itemId: $itemId
+                }) {
+                  item { id }
+                }
+              }`, {
+                projectId: project.id,
+                itemId: item.id,
+              });
+
+              item.isArchived = false;
             }
 
             async function setSelect(project, item, fieldName, value) {
@@ -429,8 +456,6 @@ jobs:
             }
 
             async function syncIssue(project, issue) {
-              core.info(`Syncing #${issue.number}: ${issue.title}`);
-
               const lookup = await findProjectItemWithRetry(project, issue);
               const currentProject = lookup.project;
               const item = lookup.item;
@@ -439,20 +464,28 @@ jobs:
                 return;
               }
 
-              await setSelect(currentProject, item, 'Entry type', mapEntryType(issue));
+              const { data: currentIssue } = await github.rest.issues.get({
+                owner,
+                repo,
+                issue_number: issue.number,
+              });
 
-              const status = mapStatus(issue);
+              core.info(`Syncing #${currentIssue.number}: ${currentIssue.title}`);
+              await restoreProjectItem(currentProject, item, currentIssue);
+              await setSelect(currentProject, item, 'Entry type', mapEntryType(currentIssue));
+
+              const status = mapStatus(currentIssue);
               if (status) {
                 await setSelect(currentProject, item, 'Status', status);
               } else {
                 core.info('Leave Status unchanged');
               }
 
-              await setSelect(currentProject, item, 'Priority', mapPriority(issue));
-              await setSelect(currentProject, item, 'Size', mapSize(issue));
-              await setSelect(currentProject, item, 'Area', mapArea(issue));
-              await setSelect(currentProject, item, 'Risk review', mapRiskReview(issue));
-              await setSelect(currentProject, item, 'Implementation wave', mapImplementationWave(issue));
+              await setSelect(currentProject, item, 'Priority', mapPriority(currentIssue));
+              await setSelect(currentProject, item, 'Size', mapSize(currentIssue));
+              await setSelect(currentProject, item, 'Area', mapArea(currentIssue));
+              await setSelect(currentProject, item, 'Risk review', mapRiskReview(currentIssue));
+              await setSelect(currentProject, item, 'Implementation wave', mapImplementationWave(currentIssue));
             }
 
             const project = await loadProject();
