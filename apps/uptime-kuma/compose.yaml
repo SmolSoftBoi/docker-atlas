@@ -1,0 +1,18 @@
+name: uptime-kuma
+
+services:
+  uptime-kuma:
+    image: louislam/uptime-kuma:next
+    restart: unless-stopped
+    environment:
+      TZ: "${TZ:-Europe/London}"
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${UPTIME_KUMA_PORT:-3001}:3001"
+    volumes:
+      - "${DATA_ROOT:-./data}:/app/data"
+    networks:
+      - app
+
+networks:
+  app:
+    driver: bridge

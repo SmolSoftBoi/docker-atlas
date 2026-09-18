@@ -1,0 +1,66 @@
+id: uptime-kuma
+name: Uptime Kuma
+category: monitoring
+description: Self-hosted uptime monitoring and status pages with local persistent storage.
+homepage: https://uptime.kuma.pet/
+repository: https://github.com/louislam/uptime-kuma
+
+maintainers:
+  - name: SmolSoftBoi
+    github: SmolSoftBoi
+
+images:
+  - name: louislam/uptime-kuma
+    registry: docker.io
+    recommended_tag: next
+
+platforms:
+  - amd64
+  - arm64
+
+requirements:
+  ports:
+    - host: 3001
+      container: 3001
+      protocol: tcp
+  volumes:
+    - name: ${DATA_ROOT:-./data}
+      purpose: Dedicated local directory mounted directly at /app/data for all persistent state.
+  networks:
+    - app
+
+configuration:
+  env_file: .env.example
+  required_variables: []
+  optional_variables:
+    - BIND_ADDRESS
+    - UPTIME_KUMA_PORT
+    - DATA_ROOT
+    - TZ
+
+security:
+  internet_exposure: reverse-proxy-only
+  privileged: false
+  requires_docker_socket: false
+  requires_host_network: false
+  notes: >-
+    The UI binds to 127.0.0.1 by default. Keep administrator authentication
+    enabled and use HTTPS with WebSocket support for any public reverse proxy.
+    The full upstream image runs as root with its default writable filesystem;
+    no additional container privileges are requested. The next tag moves, so
+    record the deployed image digest and back up data before updates. Data and
+    backups contain credentials; setup restricts the data directory to mode 0700.
+
+backup:
+  stateful: true
+  paths:
+    - ${DATA_ROOT:-./data}
+  restore_notes: >-
+    Stop Uptime Kuma and back up the complete data directory. Move existing data
+    aside before restoring, preserve ownership and permissions, and recreate
+    the container using the backup's recorded image digest for every restore.
+    Reapply mode 0700 to the data directory. For rollback, use the matching
+    pre-update backup. Verify administrator login and monitors afterwards.
+
+status: tested
+last_reviewed: "2026-09-18"
