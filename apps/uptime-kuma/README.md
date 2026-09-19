@@ -160,7 +160,9 @@ docker compose -f compose.yaml -f backups/restore.compose.yaml config --quiet
 
 Include any existing proxy override before the restore file in every command below. On a replacement host without an existing container, restore the saved configuration and run the **Setup** preparation block with this complete file set, omitting its final `up -d` and `ps` lines. This creates the container and protects the configured data directory without starting the application or initialising a new database.
 
-The helper restores into the existing container's actual data directory. It moves all current data, including hidden files, into the backup directory before extracting, preserving it for recovery. It reapplies mode `0700` after extraction because an older backup may contain broader directory permissions.
+The helper resolves its image from the recorded digest in the restore override, pulling it if needed. The existing container may still use the failed update's image; only its actual data mount is reused. All current data, including hidden files, is moved into the backup directory before extraction, preserving it for recovery.
+
+Prepare the data directory's ownership as described in **Setup** before restoring. Extraction preserves this top-level directory's owner, while restored files and subdirectories retain the archive's numeric ownership and permissions. The helper reapplies mode `0700` to the data directory afterwards.
 
 Set `kuma_backup_dir` to an absolute path outside `DATA_ROOT`:
 
@@ -179,14 +181,20 @@ Set `kuma_backup_dir` to an absolute path outside `DATA_ROOT`:
     "$kuma_data_dir/"*) echo 'Backups must be outside DATA_ROOT.' >&2; exit 1 ;;
   esac
   kuma_previous_name="previous-data-$(date -u +%Y%m%dT%H%M%SZ)"
-  kuma_image_id="$(docker inspect --format '{{.Image}}' "$kuma_container_id")"
+  kuma_restore_image="$(docker compose -f compose.yaml -f backups/restore.compose.yaml config --images uptime-kuma)"
+  case "$kuma_restore_image" in
+    louislam/uptime-kuma@sha256:*) ;;
+    *) echo 'The restore override must use the backup image digest.' >&2; exit 1 ;;
+  esac
+  docker image inspect "$kuma_restore_image" > /dev/null 2>&1 || docker pull "$kuma_restore_image"
+  kuma_image_id="$(docker image inspect --format '{{.Id}}' "$kuma_restore_image")"
   docker compose -f compose.yaml -f backups/restore.compose.yaml stop uptime-kuma
   docker run --rm --network none --volumes-from "$kuma_container_id" \
     --mount "type=bind,src=$kuma_backup_dir,dst=/backup" \
     --entrypoint sh "$kuma_image_id" -ec '
       mkdir "/backup/$1"
       find /app/data -mindepth 1 -maxdepth 1 -exec mv -t "/backup/$1" -- {} +
-      tar --numeric-owner -xpf /backup/data.tar -C /app/data
+      tar --numeric-owner --no-overwrite-dir -xpf /backup/data.tar -C /app/data
       chmod 700 /app/data
     ' sh "$kuma_previous_name"
 )

@@ -57,10 +57,11 @@ backup:
     - ${DATA_ROOT:-./data}
   restore_notes: >-
     Stop Uptime Kuma and back up the complete data directory. Move existing data
-    aside before restoring, preserve ownership and permissions, and recreate
-    the container using the backup's recorded image digest for every restore.
-    Reapply mode 0700 to the data directory. For rollback, use the matching
-    pre-update backup. Verify administrator login and monitors afterwards.
+    aside before restoring. Use the backup's recorded image digest for both
+    the restore helper and the recreated container. Preserve restored file
+    ownership and permissions, retain the prepared data directory's owner,
+    and reapply mode 0700. For rollback, use the matching pre-update backup.
+    Verify administrator login and monitors afterwards.
 
 status: tested
-last_reviewed: "2026-09-18"
+last_reviewed: "2026-09-19"
